@@ -17,7 +17,7 @@ import urllib.error
 from typing import Optional
 
 DB_PATH = '/root/.openclaw/workspace/Finance/finance.db'
-UPLOADS_BASE = '/root/.openclaw/workspace/Finance/uploads'
+UPLOADS_BASE = '/root/.openclaw/workspace/Finance/units_photo'
 NODE_ENDPOINT = 'http://localhost:3000/api/marketing/create-unit-ad'
 DEFAULT_DESTINATION_URL = 'https://www.facebook.com'
 
