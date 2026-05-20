@@ -14,6 +14,7 @@ import os
 import json
 import urllib.request
 import urllib.error
+from typing import Optional
 
 DB_PATH = '/root/.openclaw/workspace/Finance/finance.db'
 UPLOADS_BASE = '/root/.openclaw/workspace/Finance/uploads'
@@ -21,7 +22,7 @@ NODE_ENDPOINT = 'http://localhost:3000/api/marketing/create-unit-ad'
 DEFAULT_DESTINATION_URL = 'https://www.facebook.com'
 
 
-def get_unit_data(property_id: str, unit_id: str) -> dict | None:
+def get_unit_data(property_id: str, unit_id: str) -> Optional[dict]:
     """Fetch unit row from properties_post table."""
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
@@ -38,9 +39,12 @@ def get_unit_data(property_id: str, unit_id: str) -> dict | None:
     return dict(row) if row else None
 
 
-def find_first_image(property_id: str, unit_id: str) -> str | None:
+def find_first_image(property_id: str, unit_id: str, image_folder: Optional[str] = None) -> Optional[str]:
     """Find first image file in the unit's image folder."""
-    folder = os.path.join(UPLOADS_BASE, property_id, unit_id)
+    if image_folder:
+        folder = os.path.join(UPLOADS_BASE, image_folder)
+    else:
+        folder = os.path.join(UPLOADS_BASE, property_id, unit_id)
     if not os.path.isdir(folder):
         return None
     for filename in sorted(os.listdir(folder)):
@@ -49,7 +53,7 @@ def find_first_image(property_id: str, unit_id: str) -> str | None:
     return None
 
 
-def build_ad_payload(unit: dict, image_path: str | None) -> dict:
+def build_ad_payload(unit: dict, image_path: Optional[str]) -> dict:
     """Build the ad creation payload from unit data."""
     address = unit['address'] or 'Unknown Address'
     rent = unit['rent'] or 0
@@ -101,7 +105,7 @@ def main():
 
     print(f"[create_unit_ad] Found: {unit['address']}, ${unit['rent']}/mo")
 
-    image_path = find_first_image(property_id, unit_id)
+    image_path = find_first_image(property_id, unit_id, unit.get('image_folder'))
     if not image_path:
         print(f"[create_unit_ad] WARNING: No image found in {UPLOADS_BASE}/{property_id}/{unit_id}/")
         print("[create_unit_ad] Proceeding without image (ad may have no creative)...")
@@ -122,7 +126,7 @@ def main():
         print("[create_unit_ad] Is the Node.js server running? (npm start)")
         sys.exit(1)
 
-    if result.get('success'):
+    if result.get('success') and result.get('data'):
         data = result['data']
         print(f"[create_unit_ad] SUCCESS — Ad created:")
         print(f"  Campaign ID:  {data['campaignId']}")
@@ -130,7 +134,7 @@ def main():
         print(f"  Creative ID:  {data['creativeId']}")
         print(f"  Ad ID:        {data['adId']}")
     else:
-        print(f"[create_unit_ad] ERROR: {result.get('error')}")
+        print(f"[create_unit_ad] ERROR: {result.get('error', 'Unknown error')}")
         sys.exit(1)
 
 
