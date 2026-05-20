@@ -276,7 +276,60 @@ sudo nginx -t
 sudo systemctl reload nginx
 ```
 
-### 5. Install and Configure PM2
+### 5. Set Up Privacy Policy URL (Required for App Review)
+
+Meta requires a privacy policy page to pass app review. Create a simple HTML file:
+
+```bash
+# Create privacy policy page
+sudo nano /var/www/your-domain.com/html/privacy.html
+```
+
+Add this content:
+
+```html
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Privacy Policy</title>
+</head>
+<body>
+<h1>Privacy Policy</h1>
+<p>Your app description here.</p>
+<p>Contact: your@email.com</p>
+</body>
+</html>
+```
+
+Then configure Nginx to serve it:
+
+```nginx
+server {
+    listen 80;
+    server_name your-domain.com;
+
+    root /var/www/your-domain.com/html;
+    index privacy.html;
+
+    location / {
+        try_files $uri $uri/ =404;
+    }
+
+    location /api/ {
+        proxy_pass http://localhost:3000;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection 'upgrade';
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_cache_bypass $http_upgrade;
+    }
+}
+```
+
+Access your privacy policy at: `https://your-domain.com/privacy.html`
+
+### 6. Install and Configure PM2
 
 ```bash
 # Install PM2 globally
@@ -292,7 +345,7 @@ pm2 save
 pm2 startup
 ```
 
-### 6. Common PM2 Commands
+### 7. Common PM2 Commands
 
 ```bash
 pm2 logs meta-bot         # View logs
