@@ -102,6 +102,18 @@ app.get('/api/marketing/campaign/:id', async (req, res) => {
   }
 });
 
+app.post('/api/marketing/campaign/:id/status', async (req, res) => {
+  console.log('[POST] /api/marketing/campaign/:id/status');
+  try {
+    validatePhase2();
+    const result = await campaignModule.updateCampaignStatus(req.params.id, req.body.status);
+    return res.json({ success: true, data: result });
+  } catch (err) {
+    console.error('[Campaign] Error:', err.message);
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 // Create ad from property data (called by Python script)
 app.post('/api/marketing/create-unit-ad', async (req, res) => {
   console.log('[POST] /api/marketing/create-unit-ad');
