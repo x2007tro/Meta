@@ -2,7 +2,7 @@
 require('dotenv').config();
 const express = require('express');
 const config = require('./config');
-const webhookRouter = require('./phase1_messenger/webhook');
+const { router: webhookRouter } = require('./phase1_messenger/webhook');
 
 // Phase 2 - validate on use
 const validatePhase2 = () => {
