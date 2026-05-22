@@ -48,6 +48,101 @@ function hasQuickReply(messageEvent) {
   return !!(messageEvent.quick_reply && messageEvent.quick_reply.payload);
 }
 
+// ─── Quick-reply option sets ───────────────────────────────────────
+
+function buildAdultsOptions() {
+  return [
+    { content_type: 'text', title: '1', payload: 'adults_1' },
+    { content_type: 'text', title: '2', payload: 'adults_2' },
+    { content_type: 'text', title: '3', payload: 'adults_3' },
+    { content_type: 'text', title: '4', payload: 'adults_4' },
+    { content_type: 'text', title: '5+', payload: 'adults_5plus' },
+  ];
+}
+
+function buildKidsOptions() {
+  return [
+    { content_type: 'text', title: '0', payload: 'kids_0' },
+    { content_type: 'text', title: '1', payload: 'kids_1' },
+    { content_type: 'text', title: '2', payload: 'kids_2' },
+    { content_type: 'text', title: '3', payload: 'kids_3' },
+    { content_type: 'text', title: '4', payload: 'kids_4' },
+    { content_type: 'text', title: '5+', payload: 'kids_5plus' },
+  ];
+}
+
+function buildIncomeOptions() {
+  return [
+    { content_type: 'text', title: 'Below $30,000/year', payload: 'income_1' },
+    { content_type: 'text', title: '$30,000–$80,000/year', payload: 'income_2' },
+    { content_type: 'text', title: '$80,000–$150,000/year', payload: 'income_3' },
+    { content_type: 'text', title: 'Above $150,000/year', payload: 'income_4' },
+  ];
+}
+
+/**
+ * Send the question for a given step (1-6)
+ */
+async function sendQuestion(senderId, step, name) {
+  const nameCtx = name ? `, ${name}` : '';
+
+  switch (step) {
+    case STEP.NAME:
+      await sendTextMessage(senderId, "Hi! Thanks for your interest. I'm Takashi — I manage this rental personally.\n\nTo get started, what's your name?");
+      break;
+
+    case STEP.ADULTS:
+      await sendQuickReplies(
+        senderId,
+        `Hi${nameCtx}! Nice to meet you. How many adults will be living in the unit?`,
+        buildAdultsOptions()
+      );
+      break;
+
+    case STEP.KIDS:
+      await sendQuickReplies(
+        senderId,
+        `Got it${nameCtx}. And how many kids?`,
+        buildKidsOptions()
+      );
+      break;
+
+    case STEP.PHONE:
+      await sendTextMessage(senderId, `Perfect${nameCtx}. What's your phone number? (so Takashi can reach you)`);
+      break;
+
+    case STEP.OCCUPATION:
+      await sendTextMessage(senderId, `Thanks${nameCtx}! What's your occupation?`);
+      break;
+
+    case STEP.INCOME:
+      await sendQuickReplies(
+        senderId,
+        `Last question${nameCtx} — what's your annual income range?`,
+        buildIncomeOptions()
+      );
+      break;
+
+    default:
+      await sendTextMessage(senderId, "Something went wrong. Let's start over — what's your name?");
+  }
+}
+
+/**
+ * Send invalid answer response with step-specific hint
+ */
+async function sendInvalidAnswer(senderId, step) {
+  const hints = {
+    [STEP.NAME]: "Sorry, I didn't catch that. Please enter your name (e.g., John)",
+    [STEP.ADULTS]: "Please tap one of the options below.",
+    [STEP.KIDS]: "Please tap one of the options below.",
+    [STEP.PHONE]: "Please enter a valid 10-digit North American phone number (e.g., 4165551234)",
+    [STEP.OCCUPATION]: "Please enter your occupation (e.g., Engineer)",
+    [STEP.INCOME]: "Please tap one of the income options below.",
+  };
+  await sendTextMessage(senderId, hints[step] || "Please try again.");
+}
+
 // ─── State ───────────────────────────────────────────────────────
 
 const STATE = {
