@@ -60,6 +60,9 @@ function extractName(text) {
   // First capitalized word early in message
   const simple = text.match(/^([A-Z][a-z]{1,15})\b/);
   if (simple) return simple[1];
+  // "4. Myself" — digit followed by period and capitalized word
+  const numberedMatch = text.match(/\d+\.\s*([A-Z][a-z]{1,15})/);
+  if (numberedMatch) return numberedMatch[1];
   return null;
 }
 
@@ -79,17 +82,25 @@ function extractOccupation(text) {
 /**
  * Extract income, normalize to monthly before-tax.
  * Input: "$50k/month" or "50000" or "50000/year"
+ * Picks the LARGEST value to avoid greedy matching (e.g., "1 Ke 2 Analyst, 30000/year")
  */
 function extractIncome(text) {
-  const match = text.match(/\$?\s*(\d[\d,]*\.?\d*)\s*(k|K)?\s*(?:\/\s*(?:month|mo|year|yr))?/);
-  if (!match) return null;
-  let value = parseFloat(match[1].replace(/,/g, ''));
-  const isK = !!match[2];
-  if (isK) value *= 1000;
+  const matches = [...text.matchAll(/\$?\s*(\d[\d,]*\.?\d*)\s*(k|K)?\s*(?:\/\s*(?:month|mo|year|yr))?/g)];
+  if (!matches || matches.length === 0) return null;
 
-  // If >= 30000, assume annual — divide by 12
-  if (value >= 30000) value = value / 12;
-  return Math.round(value);
+  let bestValue = null;
+  for (const match of matches) {
+    let value = parseFloat(match[1].replace(/,/g, ''));
+    const isK = !!match[2];
+    if (isK) value *= 1000;
+    // If >= 30000, assume annual — divide by 12
+    if (value >= 30000) value = value / 12;
+    // Keep the largest valid income
+    if (bestValue === null || value > bestValue) {
+      bestValue = Math.round(value);
+    }
+  }
+  return bestValue;
 }
 
 /**
@@ -133,6 +144,10 @@ function extractHousehold(text) {
       const end = Math.min(text.length, idx + kw.length + 30);
       return text.substring(start, end).trim();
     }
+  }
+  // "Myself" / "me alone" / "solo" / "alone" → 1 adult
+  if (/\b(myself|me alone|solo|alone|i live|i'?m solo)\b/i.test(text)) {
+    return '1 adult';
   }
   return null;
 }
