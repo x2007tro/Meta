@@ -7,7 +7,7 @@ const config = require('../config');
 const { handleRentalMessage } = require('./rentalBot');
 
 // Active campaigns cache (5 minute TTL)
-let campaignCache = { data: [], timestamp: 0 };
+let campaignCache = { data: [], timestamp: 0, inflight: false };
 const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 
 /**
@@ -19,11 +19,15 @@ async function getActiveCampaigns() {
   if (campaignCache.data.length && (now - campaignCache.timestamp) < CACHE_TTL_MS) {
     return campaignCache.data;
   }
+  if (campaignCache.inflight) {
+    return [];
+  }
 
   const AD_ACCOUNT_ID = config.AD_ACCOUNT_ID;
   const AD_ACCOUNT_URL = `https://graph.facebook.com/${config.GRAPH_API_VERSION}/act_${AD_ACCOUNT_ID}/campaigns`;
 
   try {
+    campaignCache.inflight = true;
     const response = await axios.get(AD_ACCOUNT_URL, {
       params: {
         fields: 'id,name,status',
@@ -37,9 +41,10 @@ async function getActiveCampaigns() {
       .map(c => ({ campaignId: c.id, name: c.name }))
       .sort((a, b) => a.name.localeCompare(b.name));
 
-    campaignCache = { data: campaigns, timestamp: now };
+    campaignCache = { data: campaigns, timestamp: now, inflight: false };
     return campaigns;
   } catch (err) {
+    campaignCache.inflight = false;
     console.error('[MessageHandler] getActiveCampaigns error:', err.response?.data || err.message);
     return [];
   }
@@ -55,6 +60,25 @@ function getPropertyDisplayFromDB(propertyId, unitId) {
     const sql = `SELECT num_bedroom, num_bathroom, city FROM properties_post WHERE property_id = ? AND unit_id = ?`;
     const row = db.prepare(sql).get(propertyId, unitId);
     return row || null;
+  } finally {
+    db.close();
+  }
+}
+
+/**
+ * Batch-fetch property displays for multiple campaigns using a single DB connection.
+ */
+function getPropertyDisplaysForCampaigns(campaigns) {
+  const db = new sqlite3.Database('/root/.openclaw/workspace/Finance/finance.db');
+  try {
+    const sql = `SELECT num_bedroom, num_bathroom, city FROM properties_post WHERE property_id = ? AND unit_id = ?`;
+    const stmt = db.prepare(sql);
+    return campaigns.map(c => {
+      const parsed = parseCampaignToDisplay(c.name);
+      if (!parsed) return { campaign: c, display: null };
+      const row = stmt.get(parsed.propertyId, parsed.unitId);
+      return { campaign: c, display: row || null };
+    });
   } finally {
     db.close();
   }
@@ -92,15 +116,21 @@ function formatPropertyLabel(propertyId, unitId, city, campaignName) {
  * Send property selection quick-replies to user
  */
 async function sendPropertyOptions(senderId, campaigns) {
-  const replies = campaigns.slice(0, 10).map(c => {
-    const parsed = parseCampaignToDisplay(c.name);
-    const label = parsed
-      ? formatPropertyLabel(parsed.propertyId, parsed.unitId, null, c.name)
-      : c.name;
+  const limited = campaigns.slice(0, 10);
+  const results = getPropertyDisplaysForCampaigns(limited);
+
+  const replies = results.map(({ campaign: c, display: dbRow }) => {
+    let label = c.name;
+    if (dbRow) {
+      const br = Number(dbRow.num_bedroom) || 0;
+      const ba = Number(dbRow.num_bathroom) || 0;
+      const cityText = dbRow.city || c.name;
+      label = `${br} bedroom ${ba} bathroom unit in ${cityText}`;
+    }
     return {
       content_type: 'text',
       title: label,
-      payload: c.name, // store campaign name as payload (property_id-unit_id)
+      payload: c.name,
     };
   });
 
@@ -168,9 +198,9 @@ async function handleMessage(senderId, messageEvent) {
     const campaigns = await getActiveCampaigns();
     if (campaigns.length > 0) {
       // Has active campaigns — check if this is a quick-reply selection (text matches campaign name)
-      const matchedCampaign = campaigns.find(c => c.name === messageEvent.text);
+      const matchedCampaign = campaigns.find(c => c.name.toLowerCase() === messageEvent.text.toLowerCase().trim());
       if (matchedCampaign && !referralRef) {
-        // User selected a property via quick-reply — store referral and route to rental bot
+        // User selected a property via quick-reply — store campaign name as referral
         userReferrals.set(senderId, matchedCampaign.name);
         await handleRentalMessage(senderId, messageEvent);
         return;
