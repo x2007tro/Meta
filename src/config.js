@@ -25,4 +25,5 @@ module.exports = {
   GRAPH_API_VERSION: process.env.GRAPH_API_VERSION || 'v21.0',
   PORT:              parseInt(process.env.PORT || '3000', 10),
   APP_URL:           process.env.APP_URL || 'https://kmpka123.ddns.net',
+  TAKASHI_EMAIL:     process.env.TAKASHI_EMAIL || '',
 };

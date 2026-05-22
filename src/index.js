@@ -1,6 +1,7 @@
 // src/index.js
 require('dotenv').config();
 const express = require('express');
+const path = require('path');
 const config = require('./config');
 const { router: webhookRouter } = require('./phase1_messenger/webhook');
 
@@ -126,6 +127,15 @@ app.post('/api/marketing/create-unit-ad', async (req, res) => {
     return res.status(500).json({ success: false, error: err.message });
   }
 });
+
+// Serve photo ZIPs (cached)
+app.use('/photos', express.static('/tmp/photos_cache', {
+  redirect: false,
+  setHeaders: (res, filePath) => {
+    res.set('Content-Type', 'application/zip');
+    res.set('Content-Disposition', `inline; filename="${path.basename(filePath)}"`);
+  },
+}));
 
 // Start server
 app.listen(config.PORT, () => {

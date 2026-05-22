@@ -1,7 +1,8 @@
 // src/phase1_messenger/messageHandler.js
-const { sendTextMessage, sendTypingOn, sendQuickReplies, sendAttachment } = require('./sendApi');
+const { sendTextMessage, sendTypingOn, sendAttachment } = require('./sendApi');
 const { userReferrals } = require('./referralStore');
 const config = require('../config');
+const { handleRentalMessage } = require('./rentalBot');
 
 /**
  * Extract property_id from referral ref (e.g., "PROPStMary-UNITSM-01" → "StMary")
@@ -36,21 +37,37 @@ function getApplicationFormPath(propertyId) {
 }
 
 /**
+ * Check if a referral ref looks like a rental property referral
+ * vs other types of referrals
+ */
+function isRentalReferral(ref) {
+  return ref && ref.startsWith('PROP') && ref.includes('-UNIT');
+}
+
+/**
  * Handle incoming message events
  */
 async function handleMessage(senderId, messageEvent) {
   const referralRef = userReferrals.get(senderId);
+
+  // If it's a rental property referral, delegate to rental bot
+  if (referralRef && isRentalReferral(referralRef)) {
+    await handleRentalMessage(senderId, messageEvent);
+    return;
+  }
+
+  // Otherwise fall through to existing keyword routing
   if (messageEvent.text) {
     await handleTextMessage(senderId, messageEvent.text, referralRef);
   } else if (messageEvent.attachments) {
     await sendTypingOn(senderId);
     await new Promise(resolve => setTimeout(resolve, 1000));
-    await sendTextMessage(senderId, "Thanks for the attachment! I'll get back to you shortly.");
+    await sendTextMessage(senderId, "Thanks for the attachment! Takashi will respond to you within 24 hours.");
   }
 }
 
 /**
- * Handle text messages with keyword routing
+ * Handle text messages with keyword routing (non-rental fallback)
  */
 async function handleTextMessage(senderId, text, referralRef = null) {
   const lowerText = text.toLowerCase().trim();
@@ -65,50 +82,34 @@ async function handleTextMessage(senderId, text, referralRef = null) {
   const propertyContext = referralRef ? ` [Re: ${referralRef}]` : '';
 
   // Handle application form requests
-  if (['application', 'apply', 'form', 'application form'].some(kw => lowerText.includes(kw))) {
-    if (propertyId) {
-      // Send typing then delay for attachment upload
-      await sendTypingOn(senderId);
-      await new Promise(resolve => setTimeout(resolve, 500));
+  if (propertyId && ['application', 'apply', 'form', 'application form'].some(kw => lowerText.includes(kw))) {
+    // Send typing then delay for attachment upload
+    await sendTypingOn(senderId);
+    await new Promise(resolve => setTimeout(resolve, 500));
 
-      const formPath = getApplicationFormPath(propertyId);
-      console.log(`[MessageHandler] Found application form for ${propertyId}: ${formPath}`);
+    const formPath = getApplicationFormPath(propertyId);
+    console.log(`[MessageHandler] Found application form for ${propertyId}: ${formPath}`);
 
-      if (formPath) {
-        // Use public URL for Messenger attachment (must be HTTPS publicly accessible)
-        const formUrl = `${config.APP_URL}/application_forms/${propertyId}/Rental%20Application%20-%20${propertyId}.pdf`;
-        console.log(`[MessageHandler] Sending attachment: ${formUrl}`);
+    if (formPath) {
+      // Use public URL for Messenger attachment (must be HTTPS publicly accessible)
+      const formUrl = `${config.APP_URL}/application_forms/${propertyId}/Rental%20Application%20-%20${propertyId}.pdf`;
+      console.log(`[MessageHandler] Sending attachment: ${formUrl}`);
 
-        // Send as Messenger attachment
-        const attachmentResult = await sendAttachment(senderId, 'file', formUrl);
+      // Send as Messenger attachment
+      const attachmentResult = await sendAttachment(senderId, 'file', formUrl);
 
-        if (attachmentResult?.message_id) {
-          reply = `Here is the application form for ${propertyId}. Please fill it out and send it back to us.${propertyContext}`;
-        } else {
-          // Fallback to link if attachment failed
-          reply = `Here is the application form for ${propertyId}: ${formUrl}${propertyContext}`;
-        }
+      if (attachmentResult?.message_id) {
+        reply = `Here is the application form for ${propertyId}. Please fill it out and send it back to us. Takashi will respond to you within 24 hours.${propertyContext}`;
       } else {
-        reply = `Sorry, I couldn't find the application form for ${propertyId}.${propertyContext}`;
+        // Fallback to link if attachment failed
+        reply = `Here is the application form for ${propertyId}: ${formUrl}. Takashi will respond to you within 24 hours.${propertyContext}`;
       }
     } else {
-      reply = "I'd be happy to send you the application form! Which property are you interested in?";
+      reply = `Sorry, I couldn't find the application form for ${propertyId}. Takashi will respond to you within 24 hours.${propertyContext}`;
     }
-    await new Promise(resolve => setTimeout(resolve, 1000));
-    await sendTextMessage(senderId, reply);
-    return;
-  }
-
-  if (['hello', 'hi', 'hey'].includes(lowerText)) {
-    reply = `Hi there! Thanks for reaching out. How can I help you today?${propertyContext}`;
-  } else if (['price', 'cost', 'how much'].some(kw => lowerText.includes(kw))) {
-    reply = "Please check the listing for pricing details. Feel free to ask any other questions!";
-  } else if (['available', 'still for sale'].some(kw => lowerText.includes(kw))) {
-    reply = "Yes, this item is still available! Would you like to arrange a viewing?";
-  } else if (['address', 'location', 'where'].some(kw => lowerText.includes(kw))) {
-    reply = "Please message us to arrange a convenient meeting location.";
   } else {
-    reply = `Thanks for your message! We'll get back to you shortly.${propertyContext}`;
+    // No keyword matching - generic response for all other messages
+    reply = `Thanks for your message! Takashi will respond to you within 24 hours.${propertyContext}`;
   }
 
   // 1 second delay for natural feel

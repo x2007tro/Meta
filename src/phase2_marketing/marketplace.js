@@ -8,6 +8,11 @@ const ad = require('./ad');
  */
 async function createMarketplaceCampaign(config) {
   try {
+    // Handle multiple images
+    const imageFilePaths = Array.isArray(config.imageFilePath)
+      ? config.imageFilePath
+      : [config.imageFilePath].filter(Boolean);
+
     // Step 1: Create campaign
     const campaignId = await campaign.createCampaign({
       name: config.campaignName,
@@ -26,20 +31,33 @@ async function createMarketplaceCampaign(config) {
     });
     console.log(`[Marketplace] Step 2/5: Ad set created: ${adSetId}`);
 
-    // Step 3: Upload image
-    const imageHash = await ad.uploadImage(config.imageFilePath);
-    console.log(`[Marketplace] Step 3/5: Image uploaded, hash: ${imageHash}`);
+    // Step 3: Upload all images
+    let imageHashes = [];
+    if (imageFilePaths.length > 0) {
+      imageHashes = await ad.uploadImages(imageFilePaths);
+      console.log(`[Marketplace] Step 3/5: Uploaded ${imageHashes.length} images, hashes: ${imageHashes.join(', ')}`);
+    }
 
-    // Step 4: Create ad creative
-    const creativeId = await ad.createAdCreative({
-      name: `${config.adName} (Creative)`,
-      destinationUrl: config.destinationUrl,
-      primaryText: config.primaryText,
-      headline: config.headline,
-      description: config.description,
-      imageHash,
-      ref: config.ref,
-    });
+    // Step 4: Create ad creative (single image for reliability)
+    let creativeId;
+    if (imageHashes.length > 0) {
+      creativeId = await ad.createAdCreative({
+        name: `${config.adName} (Creative)`,
+        destinationUrl: config.destinationUrl,
+        primaryText: config.primaryText,
+        headline: config.headline,
+        description: config.description,
+        imageHash: imageHashes[0],
+      });
+    } else {
+      creativeId = await ad.createAdCreative({
+        name: `${config.adName} (Creative)`,
+        destinationUrl: config.destinationUrl,
+        primaryText: config.primaryText,
+        headline: config.headline,
+        description: config.description,
+      });
+    }
     console.log(`[Marketplace] Step 4/5: Ad creative created: ${creativeId}`);
 
     // Step 5: Create ad

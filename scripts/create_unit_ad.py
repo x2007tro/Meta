@@ -17,7 +17,7 @@ import urllib.error
 from typing import Optional
 
 DB_PATH = '/root/.openclaw/workspace/Finance/finance.db'
-UPLOADS_BASE = '/root/.openclaw/workspace/Finance/units_photo'
+UPLOADS_BASE = '/root/.openclaw/workspace/RealEstate/units_photo'
 NODE_ENDPOINT = 'http://localhost:3000/api/marketing/create-unit-ad'
 DEFAULT_DESTINATION_URL = 'https://www.facebook.com'
 
@@ -28,8 +28,11 @@ def get_unit_data(property_id: str, unit_id: str) -> Optional[dict]:
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
     cursor.execute(
-        '''SELECT property_id, unit_id, address, description, rent,
-                  status, image_folder, city, country
+        '''SELECT property_id, unit_id, address, description,
+                  rent, building_type, num_bedroom, num_bathroom,
+                  laundry_type, has_backyard, has_AC, has_parking,
+                  utility_included, sqft, available_from,
+                  status, image_folder, city, province, country
            FROM properties_post
            WHERE property_id = ? AND unit_id = ?''',
         (property_id, unit_id)
@@ -39,39 +42,71 @@ def get_unit_data(property_id: str, unit_id: str) -> Optional[dict]:
     return dict(row) if row else None
 
 
-def find_first_image(property_id: str, unit_id: str, image_folder: Optional[str] = None) -> Optional[str]:
-    """Find first image file in the unit's image folder."""
+def find_all_images(property_id: str, unit_id: str, image_folder: Optional[str] = None) -> list:
+    """Find all image files in the unit's image folder."""
     if image_folder:
         folder = os.path.join(UPLOADS_BASE, image_folder)
     else:
         folder = os.path.join(UPLOADS_BASE, property_id, unit_id)
     if not os.path.isdir(folder):
-        return None
+        return []
+    images = []
     for filename in sorted(os.listdir(folder)):
         if filename.lower().endswith(('.png', '.jpg', '.jpeg', '.webp')):
-            return os.path.join(folder, filename)
-    return None
+            images.append(os.path.join(folder, filename))
+    return images
 
 
-def build_ad_payload(unit: dict, image_path: Optional[str]) -> dict:
+def fill_template(template: str, unit: dict) -> str:
+    """Replace placeholders in template with actual values."""
+    if not template:
+        return ''
+    replacements = {
+        '{num_bedroom}': str(unit.get('num_bedroom', '')),
+        '{num_bathroom}': str(unit.get('num_bathroom', '')),
+        '{building_type}': str(unit.get('building_type', '')),
+        '{city}': str(unit.get('city', '')),
+        '{province}': str(unit.get('province', '')),
+        '{laundry_type}': str(unit.get('laundry_type', '')),
+        '{has_AC}': str(unit.get('has_AC', '')),
+        '{has_parking}': str(unit.get('has_parking', '')),
+        '{utility_included}': str(unit.get('utility_included', '')),
+        '{rent}': str(unit.get('rent', '')),
+        '{available_from}': str(unit.get('available_from', '')),
+        '{sqft}': str(unit.get('sqft', '')),
+    }
+    result = template
+    for placeholder, value in replacements.items():
+        result = result.replace(placeholder, value)
+    return result
+
+
+def build_ad_payload(unit: dict, image_paths: list) -> dict:
     """Build the ad creation payload from unit data."""
     address = unit['address'] or 'Unknown Address'
     rent = unit['rent'] or 0
+    city = unit.get('city', '')
+    province = unit.get('province', '')
+    building_type = unit.get('building_type', 'unit')
+    num_bedroom = unit.get('num_bedroom', '')
+    num_bathroom = unit.get('num_bathroom', '')
 
     return {
         'propertyId': unit['property_id'],
         'unitId': unit['unit_id'],
-        'campaignName': f"Rental Campaign - {address}",
-        'objective': 'OUTCOME_TRAFFIC',
-        'adSetName': f"{address} AdSet",
-        'dailyBudgetCents': 1000,
+        'campaignName': f"PROP{unit['property_id']}-UNIT{unit['unit_id']} - Rental Campaign",
+        'objective': 'OUTCOME_ENGAGEMENT',
+        'specialAdCategories': ['HOUSING'],
+        'adSetName': f"{city}, {province} AdSet",
+        'dailyBudgetCents': 200,
         'country': unit.get('country') or 'CA',
-        'adName': f"{address} Ad",
+        'adName': f"{city} {building_type.title()} Ad",
         'destinationUrl': DEFAULT_DESTINATION_URL,
-        'primaryText': f"{unit.get('description', 'Rental available')} at {address}, ${rent}/mo",
-        'headline': f"For Rent: {address}",
-        'description': unit.get('description', ''),
-        'imageFilePath': image_path or '',
+        'primaryText': fill_template(unit.get('feature', ''), unit),
+        'headline': fill_template(unit.get('headline', ''), unit),
+        'description': fill_template(unit.get('description', ''), unit),
+        'imageFilePath': image_paths[0] if image_paths else '',
+        'ref': f"PROP{unit['property_id']}-UNIT{unit['unit_id']}",
     }
 
 
@@ -88,10 +123,25 @@ def create_ad(payload: dict) -> dict:
         return json.loads(resp.read().decode('utf-8'))
 
 
+def parse_args():
+    """Parse command line arguments."""
+    args = sys.argv[1:]
+    kwargs = {}
+    # Parse --key=value flags
+    args = [a for a in args if a.startswith('--')]
+    for arg in args:
+        if '=' in arg:
+            key, value = arg[2:].split('=', 1)
+            kwargs[key] = value
+    return kwargs
+
+
 def main():
-    if len(sys.argv) != 3:
-        print("Usage: python3 scripts/create_unit_ad.py <property_id> <unit_id>")
+    if len(sys.argv) < 3:
+        print("Usage: python3 scripts/create_unit_ad.py <property_id> <unit_id> [--campaign-name=<name>] [--objective=<objective>]")
         sys.exit(1)
+
+    extra = parse_args()
 
     property_id = sys.argv[1]
     unit_id = sys.argv[2]
@@ -105,14 +155,19 @@ def main():
 
     print(f"[create_unit_ad] Found: {unit['address']}, ${unit['rent']}/mo")
 
-    image_path = find_first_image(property_id, unit_id, unit.get('image_folder'))
-    if not image_path:
-        print(f"[create_unit_ad] WARNING: No image found in {UPLOADS_BASE}/{property_id}/{unit_id}/")
-        print("[create_unit_ad] Proceeding without image (ad may have no creative)...")
+    image_paths = find_all_images(property_id, unit_id, unit.get('image_folder'))
+    if not image_paths:
+        print(f"[create_unit_ad] WARNING: No images found in {UPLOADS_BASE}/{property_id}/{unit_id}/")
+        print("[create_unit_ad] Proceeding without images (ad may have no creative)...")
     else:
-        print(f"[create_unit_ad] Using image: {image_path}")
+        print(f"[create_unit_ad] Using {len(image_paths)} images: {image_paths[0]}...")
 
-    payload = build_ad_payload(unit, image_path)
+    payload = build_ad_payload(unit, image_paths)
+
+    # Override with command-line extras (--campaign-name, --objective, etc.)
+    for key in ('campaignName', 'objective', 'destinationUrl', 'dailyBudgetCents', 'adName'):
+        if key in extra:
+            payload[key] = extra[key]
 
     print(f"[create_unit_ad] Sending request to {NODE_ENDPOINT}...")
     try:
