@@ -9,6 +9,10 @@ const BASE_URL = `https://graph.facebook.com/${config.GRAPH_API_VERSION}/${confi
  */
 async function createAdSet(campaignId, options) {
   try {
+    const now = new Date();
+    const endDate = new Date(now);
+    endDate.setDate(endDate.getDate() + 7);
+
     const response = await axios.post(`${BASE_URL}/adsets`, {
       name: options.name,
       campaign_id: campaignId,
@@ -18,6 +22,8 @@ async function createAdSet(campaignId, options) {
       daily_budget: options.dailyBudgetCents || 1000,
       targeting: options.targeting,
       status: 'PAUSED',
+      start_time: now.toISOString().split('.')[0],
+      end_time: endDate.toISOString().split('.')[0],
       access_token: config.PAGE_ACCESS_TOKEN,
     });
 

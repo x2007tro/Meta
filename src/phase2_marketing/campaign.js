@@ -9,18 +9,12 @@ const BASE_URL = `https://graph.facebook.com/${config.GRAPH_API_VERSION}/${confi
  */
 async function createCampaign(options) {
   try {
-    const now = new Date();
-    const endDate = new Date(now);
-    endDate.setDate(endDate.getDate() + 7);
-
     const response = await axios.post(`${BASE_URL}/campaigns`, {
       name: options.name,
       objective: options.objective,
       status: 'PAUSED',
       special_ad_categories: options.specialAdCategories || [],
       is_adset_budget_sharing_enabled: false,
-      start_time: now.toISOString().split('.')[0],
-      end_date: endDate.toISOString().split('.')[0],
       access_token: config.PAGE_ACCESS_TOKEN,
     });
 
