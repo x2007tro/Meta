@@ -51,10 +51,13 @@ async function getActiveCampaigns() {
  */
 function getPropertyDisplayFromDB(propertyId, unitId) {
   const db = new sqlite3.Database('/root/.openclaw/workspace/Finance/finance.db');
-  const sql = `SELECT num_bedroom, num_bathroom, city FROM properties_post WHERE property_id = ? AND unit_id = ?`;
-  const row = db.prepare(sql).get(propertyId, unitId);
-  db.close();
-  return row || null;
+  try {
+    const sql = `SELECT num_bedroom, num_bathroom, city FROM properties_post WHERE property_id = ? AND unit_id = ?`;
+    const row = db.prepare(sql).get(propertyId, unitId);
+    return row || null;
+  } finally {
+    db.close();
+  }
 }
 
 /**
@@ -73,7 +76,7 @@ function parseCampaignToDisplay(campaignName) {
 /**
  * Format display text: "3 bedroom 2 bathroom unit in Victoria"
  */
-function formatPropertyLabel(propertyId, unitId, city) {
+function formatPropertyLabel(propertyId, unitId, city, campaignName) {
   const dbRow = getPropertyDisplayFromDB(propertyId, unitId);
   if (dbRow) {
     const br = Number(dbRow.num_bedroom) || 0;
@@ -92,7 +95,7 @@ async function sendPropertyOptions(senderId, campaigns) {
   const replies = campaigns.slice(0, 10).map(c => {
     const parsed = parseCampaignToDisplay(c.name);
     const label = parsed
-      ? formatPropertyLabel(parsed.propertyId, parsed.unitId, null)
+      ? formatPropertyLabel(parsed.propertyId, parsed.unitId, null, c.name)
       : c.name;
     return {
       content_type: 'text',
