@@ -94,7 +94,7 @@ def build_ad_payload(unit: dict, image_paths: list) -> dict:
     return {
         'propertyId': unit['property_id'],
         'unitId': unit['unit_id'],
-        'campaignName': f"{unit['property_id']}-{unit['unit_id']} - Rental Campaign",
+        'campaignName': f"{unit['property_id']}-{unit['unit_id']}",
         'objective': 'OUTCOME_ENGAGEMENT',
         'specialAdCategories': ['HOUSING'],
         'adSetName': f"{city}, {province} AdSet",
