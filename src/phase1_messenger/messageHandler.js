@@ -1,8 +1,48 @@
 // src/phase1_messenger/messageHandler.js
 const { sendTextMessage, sendTypingOn, sendAttachment } = require('./sendApi');
 const { userReferrals } = require('./referralStore');
+const axios = require('axios');
 const config = require('../config');
 const { handleRentalMessage } = require('./rentalBot');
+
+// Active campaigns cache (5 minute TTL)
+let campaignCache = { data: [], timestamp: 0 };
+const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+
+/**
+ * Fetch active campaigns from Meta Marketing API
+ * Returns array of { campaignId, name } sorted by name
+ */
+async function getActiveCampaigns() {
+  const now = Date.now();
+  if (campaignCache.data.length && (now - campaignCache.timestamp) < CACHE_TTL_MS) {
+    return campaignCache.data;
+  }
+
+  const AD_ACCOUNT_ID = config.AD_ACCOUNT_ID;
+  const AD_ACCOUNT_URL = `https://graph.facebook.com/${config.GRAPH_API_VERSION}/act_${AD_ACCOUNT_ID}/campaigns`;
+
+  try {
+    const response = await axios.get(AD_ACCOUNT_URL, {
+      params: {
+        fields: 'id,name,status',
+        statusing: { 'campaign.status': ['ACTIVE'] },
+        access_token: config.PAGE_ACCESS_TOKEN,
+      },
+    });
+
+    const campaigns = (response.data?.data || [])
+      .filter(c => c.status === 'ACTIVE')
+      .map(c => ({ campaignId: c.id, name: c.name }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+
+    campaignCache = { data: campaigns, timestamp: now };
+    return campaigns;
+  } catch (err) {
+    console.error('[MessageHandler] getActiveCampaigns error:', err.response?.data || err.message);
+    return [];
+  }
+}
 
 /**
  * Extract property_id from referral ref (e.g., "PROPStMary-UNITSM-01" → "StMary")
