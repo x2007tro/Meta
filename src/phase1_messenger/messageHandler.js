@@ -1,7 +1,8 @@
 // src/phase1_messenger/messageHandler.js
-const { sendTextMessage, sendTypingOn, sendAttachment } = require('./sendApi');
+const { sendTextMessage, sendTypingOn, sendAttachment, sendQuickReplies } = require('./sendApi');
 const { userReferrals } = require('./referralStore');
 const axios = require('axios');
+const sqlite3 = require('sqlite3');
 const config = require('../config');
 const { handleRentalMessage } = require('./rentalBot');
 
@@ -42,6 +43,69 @@ async function getActiveCampaigns() {
     console.error('[MessageHandler] getActiveCampaigns error:', err.response?.data || err.message);
     return [];
   }
+}
+
+/**
+ * Get property display info from SQLite DB (synchronous)
+ * Returns { num_bedroom, num_bathroom, city } or null
+ */
+function getPropertyDisplayFromDB(propertyId, unitId) {
+  const db = new sqlite3.Database('/root/.openclaw/workspace/Finance/finance.db');
+  const sql = `SELECT num_bedroom, num_bathroom, city FROM properties_post WHERE property_id = ? AND unit_id = ?`;
+  const row = db.prepare(sql).get(propertyId, unitId);
+  db.close();
+  return row || null;
+}
+
+/**
+ * Parse campaign name (format: "property_id-unit_id") to extract parts.
+ * e.g., "McClure-MC-rear" → { propertyId: "McClure", unitId: "MC-rear" }
+ */
+function parseCampaignToDisplay(campaignName) {
+  if (!campaignName || !campaignName.includes('-')) return null;
+  const parts = campaignName.split('-');
+  if (parts.length < 2) return null;
+  const unitId = parts[parts.length - 1];
+  const propertyId = parts.slice(0, -1).join('-');
+  return { propertyId, unitId };
+}
+
+/**
+ * Format display text: "3 bedroom 2 bathroom unit in Victoria"
+ */
+function formatPropertyLabel(propertyId, unitId, city) {
+  const dbRow = getPropertyDisplayFromDB(propertyId, unitId);
+  if (dbRow) {
+    const br = Number(dbRow.num_bedroom) || 0;
+    const ba = Number(dbRow.num_bathroom) || 0;
+    const cityText = dbRow.city || propertyId;
+    return `${br} bedroom ${ba} bathroom unit in ${cityText}`;
+  }
+  // Fallback: use campaign name
+  return campaignName;
+}
+
+/**
+ * Send property selection quick-replies to user
+ */
+async function sendPropertyOptions(senderId, campaigns) {
+  const replies = campaigns.slice(0, 10).map(c => {
+    const parsed = parseCampaignToDisplay(c.name);
+    const label = parsed
+      ? formatPropertyLabel(parsed.propertyId, parsed.unitId, null)
+      : c.name;
+    return {
+      content_type: 'text',
+      title: label,
+      payload: c.name, // store campaign name as payload (property_id-unit_id)
+    };
+  });
+
+  await sendQuickReplies(
+    senderId,
+    "Which property are you interested in?",
+    replies
+  );
 }
 
 /**
