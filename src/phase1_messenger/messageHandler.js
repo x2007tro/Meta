@@ -58,13 +58,12 @@ async function getActiveCampaigns() {
  */
 function getPropertyDisplayFromDB(propertyId, unitId) {
   const db = new sqlite3.Database('/root/.openclaw/workspace/Finance/finance.db');
-  try {
-    const sql = `SELECT num_bedroom, num_bathroom, city FROM properties_post WHERE property_id = ? AND unit_id = ?`;
-    const row = db.prepare(sql).get(propertyId, unitId);
-    return row || null;
-  } finally {
-    db.close();
-  }
+  const sql = `SELECT num_bedroom, num_bathroom, city FROM properties_post WHERE property_id = ? AND unit_id = ?`;
+  const stmt = db.prepare(sql);
+  const row = stmt.bind(propertyId, unitId).step();
+  stmt.finalize();
+  db.close();
+  return row || null;
 }
 
 /**
@@ -72,24 +71,28 @@ function getPropertyDisplayFromDB(propertyId, unitId) {
  */
 function getPropertyDisplaysForCampaigns(campaigns) {
   const db = new sqlite3.Database('/root/.openclaw/workspace/Finance/finance.db');
-  try {
-    const sql = `SELECT num_bedroom, num_bathroom, city FROM properties_post WHERE property_id = ? AND unit_id = ?`;
-    const stmt = db.prepare(sql);
-    return campaigns.map(c => {
-      const parsed = parseCampaignToDisplay(c.name);
-      if (!parsed) return { campaign: c, display: null };
-      const row = stmt.get(parsed.propertyId, parsed.unitId);
-      return { campaign: c, display: row || null };
-    });
-  } finally {
-    db.close();
-  }
+  const sql = `SELECT num_bedroom, num_bathroom, city FROM properties_post WHERE property_id = ? AND unit_id = ?`;
+  const stmt = db.prepare(sql);
+  const results = campaigns.map(c => {
+    const parsed = parseCampaignToDisplay(c.name);
+    if (!parsed) return { campaign: c, display: null };
+    const row = stmt.bind(parsed.propertyId, parsed.unitId).step() || null;
+    return { campaign: c, display: row };
+  });
+  stmt.finalize();
+  db.close();
+  return results;
 }
 
 /**
- * Parse campaign name (format: "property_id-unit_id") to extract parts.
- * e.g., "McClure-MC-rear" → { propertyId: "McClure", unitId: "MC-rear" }
+ * Convert campaign name to referral ref format.
+ * e.g., "McClure-MC-rear" → "PROPMcClure-UNITMC-rear"
  */
+function campaignNameToReferral(campaignName) {
+  const parsed = parseCampaignToDisplay(campaignName);
+  if (!parsed) return null;
+  return `PROP${parsed.propertyId}-UNIT${parsed.unitId}`;
+}
 function parseCampaignToDisplay(campaignName) {
   if (!campaignName || !campaignName.includes('-')) return null;
   const parts = campaignName.split('-');
@@ -199,11 +202,15 @@ async function handleMessage(senderId, messageEvent) {
   if (messageEvent.text) {
     const campaigns = await getActiveCampaigns();
     if (campaigns.length > 0) {
-      // Has active campaigns — check if this is a quick-reply selection (text matches campaign name)
-      const matchedCampaign = campaigns.find(c => c.name.toLowerCase() === messageEvent.text.toLowerCase().trim());
+      // Check if this is a quick-reply selection (payload contains campaign name)
+      const quickReplyPayload = messageEvent.quick_reply?.payload;
+      const matchedCampaign = quickReplyPayload
+        ? campaigns.find(c => c.name === quickReplyPayload)
+        : campaigns.find(c => c.name.toLowerCase() === messageEvent.text.toLowerCase().trim());
+
       if (matchedCampaign && !referralRef) {
-        // User selected a property via quick-reply — store campaign name as referral
-        userReferrals.set(senderId, matchedCampaign.name);
+        // User selected a property via quick-reply — store proper referral format
+        userReferrals.set(senderId, campaignNameToReferral(matchedCampaign.name));
         await handleRentalMessage(senderId, messageEvent);
         return;
       }
