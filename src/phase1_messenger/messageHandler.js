@@ -66,6 +66,26 @@ function getPropertyDisplayFromDB(propertyId, unitId, callback) {
 }
 
 /**
+ * Build a lookup map from campaign names to display labels by querying DB once.
+ */
+function buildLabelMapFromDB(callback) {
+  const db = new sqlite3.Database('/root/.openclaw/workspace/Finance/finance.db');
+  const labelMap = {};
+  db.all('SELECT property_id, unit_id, num_bedroom, num_bathroom, city FROM properties_post', [], (err, rows) => {
+    if (err) { db.close(); callback({}); return; }
+    rows.forEach(r => {
+      const campaignName = r.property_id + '-' + r.unit_id;
+      const br = Number(r.num_bedroom) || 0;
+      const ba = Number(r.num_bathroom) || 0;
+      const city = r.city || r.property_id;
+      labelMap[campaignName] = `${br} bedroom ${ba} bathroom unit in ${city}`;
+    });
+    db.close();
+    callback(labelMap);
+  });
+}
+
+/**
  * Batch-fetch property displays for multiple campaigns using a single DB connection.
  */
 function getPropertyDisplaysForCampaigns(campaigns, callback) {
@@ -74,11 +94,7 @@ function getPropertyDisplaysForCampaigns(campaigns, callback) {
   const results = [];
   let pending = campaigns.length;
 
-  if (pending === 0) {
-    db.close();
-    callback([]);
-    return;
-  }
+  if (pending === 0) { db.close(); callback([]); return; }
 
   campaigns.forEach(c => {
     const parsed = parseCampaignToDisplay(c.name);
@@ -105,12 +121,17 @@ function campaignNameToReferral(campaignName) {
   if (!parsed) return null;
   return `PROP${parsed.propertyId}-UNIT${parsed.unitId}`;
 }
+/**
+ * Parse campaign name (format: "property_id-unit_id") to extract parts.
+ * e.g., "McClure-MC-rear" → { propertyId: "McClure", unitId: "MC-rear" }
+ * Split on LAST dash to handle unit_ids with dashes (like "MC-rear")
+ */
 function parseCampaignToDisplay(campaignName) {
   if (!campaignName || !campaignName.includes('-')) return null;
-  const parts = campaignName.split('-');
-  if (parts.length < 2) return null;
-  const unitId = parts[parts.length - 1];
-  const propertyId = parts.slice(0, -1).join('-');
+  const lastDashIndex = campaignName.lastIndexOf('-');
+  const propertyId = campaignName.substring(0, lastDashIndex);
+  const unitId = campaignName.substring(lastDashIndex + 1);
+  if (!propertyId || !unitId) return null;
   return { propertyId, unitId };
 }
 
@@ -135,19 +156,13 @@ function formatPropertyLabel(propertyId, unitId, city, campaignName) {
 async function sendPropertyOptions(senderId, campaigns) {
   const limited = campaigns.slice(0, 10);
 
-  // Wrap callback-based DB call in a promise
-  const results = await new Promise((resolve) => {
-    getPropertyDisplaysForCampaigns(limited, resolve);
+  // Build label map from DB, then map campaigns to labels
+  const labelMap = await new Promise((resolve) => {
+    buildLabelMapFromDB(resolve);
   });
 
-  const replies = results.map(({ campaign: c, display: dbRow }) => {
-    let label = c.name;
-    if (dbRow) {
-      const br = Number(dbRow.num_bedroom) || 0;
-      const ba = Number(dbRow.num_bathroom) || 0;
-      const cityText = dbRow.city || c.name;
-      label = `${br} bedroom ${ba} bathroom unit in ${cityText}`;
-    }
+  const replies = limited.map(c => {
+    const label = labelMap[c.name] || c.name;
     return {
       content_type: 'text',
       title: label,
