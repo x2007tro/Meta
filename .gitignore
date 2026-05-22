@@ -216,3 +216,12 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Node
+node_modules/
+package-lock.json
+
+# Local test/fixtures
+test/
+files/
+app-icon.png
