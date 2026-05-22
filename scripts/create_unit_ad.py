@@ -43,7 +43,10 @@ def get_unit_data(property_id: str, unit_id: str) -> Optional[dict]:
 
 
 def find_all_images(property_id: str, unit_id: str, image_folder: Optional[str] = None) -> list:
-    """Find all image files in the unit's image folder."""
+    """Find all image files in the unit's image folder.
+
+    If cover.jpg exists in the folder, it is placed first in the list.
+    """
     if image_folder:
         folder = os.path.join(UPLOADS_BASE, image_folder)
     else:
@@ -51,9 +54,15 @@ def find_all_images(property_id: str, unit_id: str, image_folder: Optional[str] 
     if not os.path.isdir(folder):
         return []
     images = []
+    cover_path = os.path.join(folder, 'cover.jpg')
     for filename in sorted(os.listdir(folder)):
         if filename.lower().endswith(('.png', '.jpg', '.jpeg', '.webp')):
-            images.append(os.path.join(folder, filename))
+            filepath = os.path.join(folder, filename)
+            # Put cover.jpg first
+            if filepath == cover_path:
+                images.insert(0, filepath)
+            else:
+                images.append(filepath)
     return images
 
 
