@@ -32,7 +32,8 @@ def get_unit_data(property_id: str, unit_id: str) -> Optional[dict]:
                   rent, building_type, num_bedroom, num_bathroom,
                   laundry_type, has_backyard, has_AC, has_parking,
                   utility_included, sqft, available_from,
-                  status, image_folder, city, province, country
+                  status, image_folder, city, province, country,
+                  headline, feature
            FROM properties_post
            WHERE property_id = ? AND unit_id = ?''',
         (property_id, unit_id)
