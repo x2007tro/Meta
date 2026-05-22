@@ -38,6 +38,8 @@ async function getActiveCampaigns() {
 
     const campaigns = (response.data?.data || [])
       .filter(c => c.status === 'ACTIVE')
+      // Exclude Marketplace listing campaigns (they start with '[')
+      .filter(c => !c.name.startsWith('['))
       .map(c => ({ campaignId: c.id, name: c.name }))
       .sort((a, b) => a.name.localeCompare(b.name));
 
