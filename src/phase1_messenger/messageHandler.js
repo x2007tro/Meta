@@ -163,7 +163,26 @@ async function handleMessage(senderId, messageEvent) {
     return;
   }
 
-  // Otherwise fall through to existing keyword routing
+  // No referral — check for active campaigns on text messages
+  if (messageEvent.text) {
+    const campaigns = await getActiveCampaigns();
+    if (campaigns.length > 0) {
+      // Has active campaigns — check if this is a quick-reply selection (text matches campaign name)
+      const matchedCampaign = campaigns.find(c => c.name === messageEvent.text);
+      if (matchedCampaign && !referralRef) {
+        // User selected a property via quick-reply — store referral and route to rental bot
+        userReferrals.set(senderId, matchedCampaign.name);
+        await handleRentalMessage(senderId, messageEvent);
+        return;
+      }
+      // Not a campaign match and no referral — show property options
+      await sendTypingOn(senderId);
+      await sendPropertyOptions(senderId, campaigns);
+      return;
+    }
+  }
+
+  // No active campaigns — fall through to generic response
   if (messageEvent.text) {
     await handleTextMessage(senderId, messageEvent.text, referralRef);
   } else if (messageEvent.attachments) {
