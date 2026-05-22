@@ -147,12 +147,21 @@ async function sendPropertyOptions(senderId, campaigns) {
 }
 
 /**
- * Extract property_id from referral ref (e.g., "PROPStMary-UNITSM-01" → "StMary")
+ * Extract property_id from referral ref.
+ * Supports PROP format (PROPStMary-UNITSM-01 → StMary) and
+ * direct campaign name format (McClure-MC-rear → McClure)
  */
 function getPropertyIdFromRef(referralRef) {
   if (!referralRef) return null;
-  const match = referralRef.match(/PROP(.+?)-UNIT/);
-  return match ? match[1] : null;
+  // PROP format
+  const propMatch = referralRef.match(/PROP(.+?)-UNIT/);
+  if (propMatch) return propMatch[1];
+  // Direct campaign name format — everything before the last dash
+  const parts = referralRef.split('-');
+  if (parts.length >= 2) {
+    return parts.slice(0, -1).join('-');
+  }
+  return null;
 }
 
 /**
@@ -179,11 +188,16 @@ function getApplicationFormPath(propertyId) {
 }
 
 /**
- * Check if a referral ref looks like a rental property referral
- * vs other types of referrals
+ * Check if a referral ref is a rental property referral.
+ * Accepts PROP prefix (PROPMcClure-UNITMC-rear) or direct campaign name (McClure-MC-rear)
  */
 function isRentalReferral(ref) {
-  return ref && ref.startsWith('PROP') && ref.includes('-UNIT');
+  if (!ref) return false;
+  // PROP format
+  if (ref.startsWith('PROP') && ref.includes('-UNIT')) return true;
+  // Direct campaign name format (contains dash but not starting with PROP)
+  if (ref.includes('-') && !ref.startsWith('PROP')) return true;
+  return false;
 }
 
 /**
@@ -209,8 +223,8 @@ async function handleMessage(senderId, messageEvent) {
         : campaigns.find(c => c.name.toLowerCase() === messageEvent.text.toLowerCase().trim());
 
       if (matchedCampaign && !referralRef) {
-        // User selected a property via quick-reply — store proper referral format
-        userReferrals.set(senderId, campaignNameToReferral(matchedCampaign.name));
+        // User selected a property via quick-reply — store campaign name as referral
+        userReferrals.set(senderId, matchedCampaign.name);
         await handleRentalMessage(senderId, messageEvent);
         return;
       }
