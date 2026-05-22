@@ -198,7 +198,6 @@ function getUnitByRef(ref) {
 // ─── Email ────────────────────────────────────────────────────────
 
 async function sendHandoffEmail(fields, unit, threadUrl) {
-  const incomeToRent = fields.income && unit.rent ? (fields.income / unit.rent).toFixed(1) : 'n/a';
   const body = [
     '🏠 NEW QUALIFIED LEAD',
     '',
@@ -207,13 +206,12 @@ async function sendHandoffEmail(fields, unit, threadUrl) {
     `Rent: $${unit.rent}/month`,
     '',
     'Applicant:',
-    `• Name: ${fields.name}`,
-    `• Occupation: ${fields.occupation}`,
-    `• Monthly income: $${fields.income}`,
-    `• Income-to-rent: ${incomeToRent}x`,
-    `• Move-in date: ${fields.move_in_date}`,
-    `• Household: ${fields.household}`,
-    `• Reason: ${fields.reason || 'n/a'}`,
+    `• Name: ${fields.name || 'n/a'}`,
+    `• Occupation: ${fields.occupation || 'n/a'}`,
+    `• Adults: ${fields.adults || 'n/a'}`,
+    `• Kids: ${fields.kids || 'n/a'}`,
+    `• Phone: ${fields.phone || 'n/a'}`,
+    `• Income: ${fields.income || 'n/a'}`,
     '',
     `[Open Messenger thread](${threadUrl})`,
   ].join('\n');
