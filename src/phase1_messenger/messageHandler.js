@@ -232,6 +232,20 @@ function isRentalReferral(ref) {
 }
 
 /**
+ * Send listing interest question (Yes/No quick-reply)
+ */
+async function sendListingInterestQuestion(senderId) {
+  await sendQuickReplies(
+    senderId,
+    "Are you interested in a specific listing?",
+    [
+      { content_type: 'text', title: 'Yes', payload: 'listing_interest_yes' },
+      { content_type: 'text', title: 'No', payload: 'listing_interest_no' },
+    ]
+  );
+}
+
+/**
  * Handle incoming message events
  */
 async function handleMessage(senderId, messageEvent) {
@@ -243,25 +257,37 @@ async function handleMessage(senderId, messageEvent) {
     return;
   }
 
-  // No referral — check for active campaigns on text messages
-  if (messageEvent.text) {
+  // No referral — check for active campaigns
+  if (messageEvent.text || messageEvent.quick_reply) {
     const campaigns = await getActiveCampaigns();
-    if (campaigns.length > 0) {
-      // Check if this is a quick-reply selection (payload contains campaign name)
-      const quickReplyPayload = messageEvent.quick_reply?.payload;
-      const matchedCampaign = quickReplyPayload
-        ? campaigns.find(c => c.name === quickReplyPayload)
-        : campaigns.find(c => c.name.toLowerCase() === messageEvent.text.toLowerCase().trim());
 
-      if (matchedCampaign && !referralRef) {
-        // User selected a property via quick-reply — store campaign name as referral
-        userReferrals.set(senderId, matchedCampaign.name);
+    // Check quick-reply for listing interest
+    const quickReplyPayload = messageEvent.quick_reply?.payload;
+    if (quickReplyPayload === 'listing_interest_yes') {
+      // User said yes to listing interest — show property options
+      await sendTypingOn(senderId);
+      await sendPropertyOptions(senderId, campaigns);
+      return;
+    }
+    if (quickReplyPayload === 'listing_interest_no') {
+      // User said no — generic response
+      await sendTypingOn(senderId);
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      await sendTextMessage(senderId, "Thanks! Takashi will respond to you within 24 hours.");
+      return;
+    }
+
+    if (campaigns.length > 0) {
+      // Check if this is a property quick-reply selection
+      if (quickReplyPayload && campaigns.find(c => c.name === quickReplyPayload)) {
+        userReferrals.set(senderId, quickReplyPayload);
         await handleRentalMessage(senderId, messageEvent);
         return;
       }
-      // Not a campaign match and no referral — show property options
+
+      // Not a campaign match and no prior interest question — ask if interested
       await sendTypingOn(senderId);
-      await sendPropertyOptions(senderId, campaigns);
+      await sendListingInterestQuestion(senderId);
       return;
     }
   }
