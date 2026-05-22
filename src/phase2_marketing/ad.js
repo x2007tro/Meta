@@ -125,9 +125,6 @@ async function createAdCreative(options) {
           name: options.headline,
           description: options.description,
           image_hash: options.imageHash,
-          call_to_action: {
-            type: 'MESSAGE_PAGE',
-          },
         },
       },
       access_token: config.PAGE_ACCESS_TOKEN,

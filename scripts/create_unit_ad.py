@@ -19,7 +19,7 @@ from typing import Optional
 DB_PATH = '/root/.openclaw/workspace/Finance/finance.db'
 UPLOADS_BASE = '/root/.openclaw/workspace/RealEstate/units_photo'
 NODE_ENDPOINT = 'http://localhost:3000/api/marketing/create-unit-ad'
-DEFAULT_DESTINATION_URL = 'https://m.me/108242941506376'
+DEFAULT_DESTINATION_URL = 'https://kmpka123.ddns.net/landing.html'
 
 
 def get_unit_data(property_id: str, unit_id: str) -> Optional[dict]:
