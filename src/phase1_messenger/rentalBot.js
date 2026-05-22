@@ -174,51 +174,6 @@ async function getPhotoZip(unit) {
   return stat.size <= 25 * 1024 * 1024 ? cachePath : 'oversized';
 }
 
-// ─── Message classifier ──────────────────────────────────────────
-
-async function classifyReply(text, state) {
-  const lower = text.toLowerCase();
-
-  // F: Photos request (fires from any state, state preserved)
-  const photoKeywords = ['photo', 'photos', 'pic', 'pics', 'picture', 'pictures', 'image', 'images', 'more photo', 'see more'];
-  if (photoKeywords.some((kw) => lower.includes(kw))) {
-    return { bucket: 'F' };
-  }
-
-  // E: Spam — profanity or gibberish
-  const profanity = /^[^\w]*([\W_])\1+$/.test(text) || /(?:\bass\s*\w*\s*hole|sh[i1]t|[fv]\s*ck|stupid|idiot|dumb)/i.test(text);
-  if (profanity) return { bucket: 'E' };
-
-  // Extract all fields
-  const name = extractName(text);
-  const occupation = extractOccupation(text);
-  const income = extractIncome(text);
-  const move_in_date = await extractMoveInDate(text);
-  const household = extractHousehold(text);
-  const reason = extractReason(text, name, occupation, income, move_in_date, household);
-
-  const collected = { name, occupation, income, move_in_date, household, reason };
-  const count = [name, occupation, income, move_in_date, household, reason].filter(Boolean).length;
-
-  // C: Question
-  if (/\?|how|what|when|where|why|can i|could i|is there|do es/.test(lower)) {
-    return { bucket: 'C', fields: collected, count };
-  }
-
-  // A: Complete (all 5 required fields)
-  if (name && occupation && income && move_in_date && household) {
-    return { bucket: 'A', fields: collected, count };
-  }
-
-  // B: Partial (2–4 fields)
-  if (count >= 2) {
-    return { bucket: 'B', fields: collected, count };
-  }
-
-  // D: Minimal (0–1 fields)
-  return { bucket: 'D', fields: collected, count };
-}
-
 // ─── Main handler ────────────────────────────────────────────────
 
 async function handleRentalMessage(senderId, messageEvent) {
