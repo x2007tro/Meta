@@ -3,6 +3,7 @@ const {
   sendTextMessage,
   sendTypingOn,
   sendAttachment,
+  sendQuickReplies,
 } = require('./sendApi');
 const { userReferrals } = require('./referralStore');
 const config = require('../config');

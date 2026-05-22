@@ -19,7 +19,7 @@ from typing import Optional
 DB_PATH = '/root/.openclaw/workspace/Finance/finance.db'
 UPLOADS_BASE = '/root/.openclaw/workspace/RealEstate/units_photo'
 NODE_ENDPOINT = 'http://localhost:3000/api/marketing/create-unit-ad'
-DEFAULT_DESTINATION_URL = 'https://kmpka123.ddns.net/landing.html'
+DEFAULT_DESTINATION_URL = 'https://m.me/108242941506376'
 
 
 def get_unit_data(property_id: str, unit_id: str) -> Optional[dict]:
@@ -84,6 +84,8 @@ def fill_template(template: str, unit: dict) -> str:
         '{rent}': str(unit.get('rent', '')),
         '{available_from}': str(unit.get('available_from', '')),
         '{sqft}': str(unit.get('sqft', '')),
+        '{property_id}': str(unit.get('property_id', '')),
+        '{unit_id}': str(unit.get('unit_id', '')),
     }
     result = template
     for placeholder, value in replacements.items():
@@ -105,13 +107,13 @@ def build_ad_payload(unit: dict, image_paths: list) -> dict:
         'propertyId': unit['property_id'],
         'unitId': unit['unit_id'],
         'campaignName': f"{unit['property_id']}-{unit['unit_id']}",
-        'objective': 'OUTCOME_ENGAGEMENT',
+        'objective': 'OUTCOME_TRAFFIC',
         'specialAdCategories': ['HOUSING'],
         'adSetName': f"{city}, {province} AdSet",
         'dailyBudgetCents': 200,
         'country': unit.get('country') or 'CA',
         'adName': f"{city} {building_type.title()} Ad",
-        'destinationUrl': DEFAULT_DESTINATION_URL,
+        'destinationUrl': fill_template(DEFAULT_DESTINATION_URL, unit),
         'primaryText': fill_template(unit.get('feature', ''), unit),
         'headline': fill_template(unit.get('headline', ''), unit),
         'description': fill_template(unit.get('description', ''), unit),
