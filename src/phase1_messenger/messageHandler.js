@@ -53,35 +53,47 @@ async function getActiveCampaigns() {
 }
 
 /**
- * Get property display info from SQLite DB (synchronous)
+ * Get property display info from SQLite DB
  * Returns { num_bedroom, num_bathroom, city } or null
  */
-function getPropertyDisplayFromDB(propertyId, unitId) {
+function getPropertyDisplayFromDB(propertyId, unitId, callback) {
   const db = new sqlite3.Database('/root/.openclaw/workspace/Finance/finance.db');
   const sql = `SELECT num_bedroom, num_bathroom, city FROM properties_post WHERE property_id = ? AND unit_id = ?`;
-  const stmt = db.prepare(sql);
-  const row = stmt.bind(propertyId, unitId).step();
-  stmt.finalize();
-  db.close();
-  return row || null;
+  db.get(sql, [propertyId, unitId], (err, row) => {
+    db.close();
+    callback(row || null);
+  });
 }
 
 /**
  * Batch-fetch property displays for multiple campaigns using a single DB connection.
  */
-function getPropertyDisplaysForCampaigns(campaigns) {
+function getPropertyDisplaysForCampaigns(campaigns, callback) {
   const db = new sqlite3.Database('/root/.openclaw/workspace/Finance/finance.db');
   const sql = `SELECT num_bedroom, num_bathroom, city FROM properties_post WHERE property_id = ? AND unit_id = ?`;
-  const stmt = db.prepare(sql);
-  const results = campaigns.map(c => {
+  const results = [];
+  let pending = campaigns.length;
+
+  if (pending === 0) {
+    db.close();
+    callback([]);
+    return;
+  }
+
+  campaigns.forEach(c => {
     const parsed = parseCampaignToDisplay(c.name);
-    if (!parsed) return { campaign: c, display: null };
-    const row = stmt.bind(parsed.propertyId, parsed.unitId).step() || null;
-    return { campaign: c, display: row };
+    if (!parsed) {
+      results.push({ campaign: c, display: null });
+      pending--;
+      if (pending === 0) { db.close(); callback(results); }
+      return;
+    }
+    db.get(sql, [parsed.propertyId, parsed.unitId], (err, row) => {
+      results.push({ campaign: c, display: row || null });
+      pending--;
+      if (pending === 0) { db.close(); callback(results); }
+    });
   });
-  stmt.finalize();
-  db.close();
-  return results;
 }
 
 /**
@@ -122,7 +134,11 @@ function formatPropertyLabel(propertyId, unitId, city, campaignName) {
  */
 async function sendPropertyOptions(senderId, campaigns) {
   const limited = campaigns.slice(0, 10);
-  const results = getPropertyDisplaysForCampaigns(limited);
+
+  // Wrap callback-based DB call in a promise
+  const results = await new Promise((resolve) => {
+    getPropertyDisplaysForCampaigns(limited, resolve);
+  });
 
   const replies = results.map(({ campaign: c, display: dbRow }) => {
     let label = c.name;
