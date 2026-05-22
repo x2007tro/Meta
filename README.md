@@ -103,19 +103,44 @@ npm run test:phase2  # Phase 2 integration test
 
 ## Phase 1 — Messenger Auto-Reply Features
 
-### Keyword Routing
+### Two Inquiry Flows
 
-| User Message | Auto-Reply |
-|-------------|------------|
-| `hello`, `hi`, `hey` | "Hi there! Thanks for reaching out. How can I help you today? [Re: PROP-UNIT]" |
-| `price`, `cost`, `how much` | "Please check the listing for pricing details. Feel free to ask any other questions!" |
-| `available`, `still for sale` | "Yes, this item is still available! Would you like to arrange a viewing?" |
-| `address`, `location`, `where` | "Please message us to arrange a convenient meeting location." |
-| anything else | "Thanks for your message! We'll get back to you shortly. [Re: PROP-UNIT]" |
+**Random inquiries (no rental referral):** Any message from a user without a rental property referral gets a single generic response: "Thanks for your message. Takashi will respond to you within 24 hours." No keyword matching.
+
+**Rental property inquiries (has referral ref like `PROPStMary-UNITSM-01`):** These users get a rental inquiry bot that collects 5 pieces of information before handing off to Takashi.
+
+### Rental Inquiry Bot Flow
+
+The bot (in `src/phase1_messenger/rentalBot.js`) manages a state machine per user:
+
+1. **NEW_INQUIRY** — User's first message triggers a greeting with the property headline, asking for 5 details:
+   - Name
+   - Occupation & monthly income (before tax)
+   - Move-in date
+   - Household (adults, kids, pets)
+   - Reason for moving
+
+2. **AWAITING_INFO** — Bot collects and classifies replies:
+   - **Bucket A (complete):** All 5 fields present → sends confirmation + handoff email to Takashi, state becomes `HANDOFF_TO_TAKASHI`
+   - **Bucket B (partial):** Missing some fields → prompts for only the missing ones
+   - **Bucket C (question):** User asked a question → answered + reprompts for the 5 details
+   - **Bucket E (spam):** Silently closes
+
+3. **HANDOFF_TO_TAKASHI** (terminal) — Takashi takes over. Bot blocks all further messages.
+
+4. **Photos** — Users can reply "photos" at any time to receive a ZIP of property images.
+
+**Income threshold:** Monthly income must be ≥ $2,500 (annual ≥ $30,000) to be considered complete.
+
+**Date parsing:** Move-in dates in the past fall back to one year from today.
+
+**mid deduplication:** Webhook redeliveries are ignored using an in-memory Set to prevent double replies.
+
+**Handoff email:** When a user completes the inquiry, an email is sent to Takashi via a Python subprocess with the user's responses.
 
 ### Referral Tracking
 
-When users click "Message Me" on a property ad, the referral ref (e.g., `PROPStMary-UNITSM-01`) is stored and included in auto-replies. This lets you identify which property the inquiry is about.
+When users click "Message Me" on a property ad, the referral ref (e.g., `PROPStMary-UNITSM-01`) is stored and included in auto-replies. This identifies which property the inquiry is about.
 
 ### Sending Attachments
 
@@ -168,10 +193,12 @@ Supported file types: `file`, `image`, `video`, `audio`. The URL must be publicl
 
 ### Ad Features
 
-- **Objective**: `OUTCOME_ENGAGEMENT` (enables "Message Me" CTA)
+- **Objective**: `OUTCOME_TRAFFIC` (drives traffic to Messenger conversation)
 - **Special Ad Category**: `HOUSING` (required for rental property ads)
 - **Call to Action**: Messenger (opens conversation with your Page)
-- **Referral Tracking**: `ref` field stores property/unit ID for inquiry attribution
+- **Creative**: Single-image ad (carousel temporarily disabled due to Meta API error 1443225)
+- **Ad headline**: Filled from DB `headline` column using property data
+- **Ad primary text**: Filled from DB `feature` column using property data
 
 ---
 
@@ -268,12 +295,13 @@ The script finds the first image file (`.png`, `.jpg`, `.jpeg`, `.webp`) in that
 ### Python Script Usage
 
 ```bash
-python3 scripts/create_unit_ad.py <property_id> <unit_id>
+python3 scripts/create_unit_ad.py <property_id> <unit_id> [--objective=<objective>]
 ```
 
-Example:
+Examples:
 ```bash
 python3 scripts/create_unit_ad.py StMary SM-01
+python3 scripts/create_unit_ad.py McClure MC-rear --objective=OUTCOME_TRAFFIC
 ```
 
 ### What the Script Does
