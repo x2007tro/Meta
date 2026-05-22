@@ -275,15 +275,15 @@ async function getPhotoZip(unit) {
 async function handleRentalMessage(senderId, messageEvent) {
   const mid = messageEvent.mid;
 
-  // Idempotency check
+  // ── 1. Mid deduplication ──
   if (processedMids.has(mid)) return;
   processedMids.add(mid);
-  // Prune old mids (keep set bounded)
   if (processedMids.size > 10000) {
     const arr = [...processedMids];
     arr.slice(0, 5000).forEach((m) => processedMids.delete(m));
   }
 
+  // ── 2. Get / init stateData ──
   const text = messageEvent.text || '';
   const referralRef = userReferrals.get(senderId);
   const stateData = userState.get(senderId) || {
@@ -301,41 +301,41 @@ async function handleRentalMessage(senderId, messageEvent) {
     invalidAttempts: 0,
   };
 
-  // Load unit data
+  // ── 3. Load unit data ──
   const unit = await getUnitByRef(referralRef);
 
-  // ── Photo request from HANDOFF (state preserved) ──
+  // ── 4. Photo request (state unchanged) ──
   const lower = text.toLowerCase();
-  const isPhotoReq = ['photo', 'photos', 'pic', 'pics', 'picture', 'pictures', 'image', 'images', 'more photo', 'see more'].some((kw) =>
-    lower.includes(kw)
+  const isPhotoReq = ['photo', 'photos', 'pic', 'pics', 'picture', 'pictures', 'image', 'images', 'more photo', 'see more'].some(
+    (kw) => lower.includes(kw)
   );
 
   if (isPhotoReq) {
+    if (stateData.state !== STATE.AWAITING_INFO && stateData.state !== STATE.NEW_INQUIRY && stateData.state !== STATE.HANDOFF_TO_TAKASHI) {
+      return; // only serve photos in active conversation states
+    }
     const zipPath = unit ? await getPhotoZip(unit) : null;
     if (zipPath === 'oversized') {
       await sendTypingOn(senderId);
       await sendTextMessage(
         senderId,
-        "There are a lot of photos for this unit — Takashi will email them over after you send the 5 details above."
+        "There are a lot of photos for this unit — Takashi will email them over after you send the details."
       );
     } else if (zipPath && fs.existsSync(zipPath)) {
-      // Use public URL for attachment — serve from APP_URL
       const zipUrl = `${config.APP_URL}/photos/${unit.unit_id}_photos.zip`;
       await sendTypingOn(senderId);
       await sendAttachment(senderId, 'file', zipUrl);
-      await sendTextMessage(senderId, buildPhotoReply(stateData.name));
     } else {
       await sendTextMessage(
         senderId,
-        "Sorry, no extra photos are available for this one beyond what's posted on Marketplace. Happy to answer any specific questions about the unit."
+        "Sorry, no extra photos are available for this one beyond what's posted on Marketplace. Happy to answer any specific questions."
       );
     }
-    return; // state unchanged
+    return;
   }
 
-  // ── HANDOFF_TO_TAKASHI: relay to Takashi via email ──
+  // ── 5. HANDOFF_TO_TAKASHI: relay replies to Takashi via email ──
   if (stateData.state === STATE.HANDOFF_TO_TAKASHI) {
-    // Relay reply to Takashi via email (simple: just forward text)
     if (text.trim()) {
       const threadUrl = `https://m.me/${config.PAGE_ID}?ref=${referralRef || ''}`;
       const name = stateData.name || 'Unknown';
@@ -348,110 +348,168 @@ async function handleRentalMessage(senderId, messageEvent) {
         body,
       ]);
     }
-    return; // no bot reply
+    return;
   }
 
-  // ── CLOSED: ignore ──
+  // ── 6. CLOSED: ignore ──
   if (stateData.state === STATE.CLOSED) {
     return;
   }
 
-  // ── NEW_INQUIRY ──
+  // ── 7. NEW_INQUIRY: start step-based flow ──
   if (stateData.state === STATE.NEW_INQUIRY) {
     stateData.state = STATE.AWAITING_INFO;
-    const reply = unit ? buildResponse1(unit) : 'Hi! Thanks for your interest. Could you reply with: 1. Your name, 2. Occupation & monthly income (before tax), 3. Move-in date, 4. Who\'s moving in, 5. Why you\'re moving. I\'ll get back to you shortly.';
-    await sendTypingOn(senderId);
-    await sendTextMessage(senderId, reply);
+    stateData.step = STEP.NAME;
+    stateData.fieldsCollected = {
+      name: null,
+      adults: null,
+      kids: null,
+      phone: null,
+      occupation: null,
+      income: null,
+    };
+    stateData.name = null;
+    stateData.invalidAttempts = 0;
     userState.set(senderId, stateData);
+    await sendQuestion(senderId, STEP.NAME, null);
     return;
   }
 
-  // ── AWAITING_INFO: classify ──
+  // ── 8. AWAITING_INFO: step-based flow ──
   if (stateData.state === STATE.AWAITING_INFO) {
-    const classification = await classifyReply(text, stateData.state);
-    const { bucket, fields } = classification;
-
-    // Update name if found
-    if (fields.name) stateData.name = fields.name;
-    stateData.fieldsCollected = { ...stateData.fieldsCollected, ...fields };
-
-    // E: Spam — no reply, close
-    if (bucket === 'E') {
-      stateData.state = STATE.CLOSED;
-      userState.set(senderId, stateData);
-      return;
-    }
-
-    // F: Photos already handled above (early return)
-    // C: Question
-    if (bucket === 'C') {
-      const answer = unit ? answerQuestion(text, unit) : null;
-      let reply = answer || 'Good question — Takashi will answer that directly. Could you first reply with the 5 details above so he has context?';
-      reply += '\n\nTo move forward, could you reply with:\n1. Your name\n2. Occupation & monthly income (before tax)\n3. Move-in date\n4. Who\'s moving in (adults, kids, pets)\n5. Why you\'re moving';
-      await sendTypingOn(senderId);
-      await sendTextMessage(senderId, reply);
-      stateData.botMsgCount++;
-      userState.set(senderId, stateData);
-      return;
-    }
-
-    // A: Complete → HANDOFF
-    if (bucket === 'A') {
-      stateData.state = STATE.HANDOFF_TO_TAKASHI;
-      stateData.fieldsCollected = fields;
-      userState.set(senderId, stateData);
-
-      await sendTypingOn(senderId);
-      await sendTextMessage(senderId, buildResponse2A(stateData.name || fields.name || 'there'));
-
-      if (unit) {
-        const threadUrl = `https://m.me/${config.PAGE_ID}?ref=${referralRef || ''}`;
-        await sendHandoffEmail(fields, unit, threadUrl);
-      }
-      return;
-    }
-
-    // B: Partial → ask for missing
-    if (bucket === 'B') {
-      const required = ['name', 'occupation', 'income', 'move_in_date', 'household'];
-      const name = fields.name || stateData.name;
-
-      // Build missing list — income is always evaluated separately
-      const missing = required.filter((f) => !fields[f] && f !== 'income');
-
-      // Special case: if both occupation AND income missing → de-dupe to one bullet
-      // If only income missing (occupation present) → show income bullet
-      // If only occupation missing (income present) → show occupation bullet
-      if (!fields.occupation && !fields.income) {
-        // both missing — occupation label covers both, already in missing list as 'occupation'
-      } else if (fields.occupation && !fields.income) {
-        // income missing alone — swap 'occupation' for 'income' in missing
-        const idx = missing.indexOf('occupation');
-        if (idx !== -1) missing.splice(idx, 1, 'income');
-      } else if (!fields.occupation && fields.income) {
-        // occupation missing alone — keep 'occupation' in missing list
-      }
-
-      await sendTypingOn(senderId);
-      await sendTextMessage(senderId, buildResponse2B(name || 'there', missing));
-      stateData.botMsgCount++;
-      userState.set(senderId, stateData);
-      return;
-    }
-
-    // D: Minimal
-    if (bucket === 'D') {
-      stateData.botMsgCount++;
-      if (stateData.botMsgCount >= 3) {
-        stateData.state = STATE.CLOSED;
+    // Quick-reply steps: ADULTS, KIDS, INCOME
+    if (isQuickReplyStep(stateData.step)) {
+      if (!hasQuickReply(messageEvent)) {
+        stateData.invalidAttempts++;
+        if (stateData.invalidAttempts >= 3) {
+          stateData.state = STATE.CLOSED;
+          userState.set(senderId, stateData);
+          return;
+        }
+        await sendInvalidAnswer(senderId, stateData.step);
         userState.set(senderId, stateData);
         return;
       }
-      await sendTypingOn(senderId);
-      await sendTextMessage(senderId, buildResponse2D(stateData.name));
+
+      const payload = messageEvent.quick_reply.payload;
+      let value = null;
+
+      if (stateData.step === STEP.ADULTS) {
+        const map = { adults_1: '1', adults_2: '2', adults_3: '3', adults_4: '4', adults_5plus: '5+' };
+        value = map[payload] || null;
+      } else if (stateData.step === STEP.KIDS) {
+        const map = { kids_0: '0', kids_1: '1', kids_2: '2', kids_3: '3', kids_4: '4', kids_5plus: '5+' };
+        value = map[payload] || null;
+      } else if (stateData.step === STEP.INCOME) {
+        const map = {
+          income_1: 'Below $30,000/year',
+          income_2: '$30,000–$80,000/year',
+          income_3: '$80,000–$150,000/year',
+          income_4: 'Above $150,000/year',
+        };
+        value = map[payload] || null;
+      }
+
+      // Save field and advance
+      if (value !== null) {
+        if (stateData.step === STEP.ADULTS) stateData.fieldsCollected.adults = value;
+        else if (stateData.step === STEP.KIDS) stateData.fieldsCollected.kids = value;
+        else if (stateData.step === STEP.INCOME) stateData.fieldsCollected.income = value;
+
+        stateData.invalidAttempts = 0;
+        stateData.step++;
+
+        if (stateData.step > STEP.INCOME) {
+          // Transition to HANDOFF
+          stateData.state = STATE.HANDOFF_TO_TAKASHI;
+          userState.set(senderId, stateData);
+          const displayName = stateData.name || stateData.fieldsCollected.name || 'there';
+          await sendTypingOn(senderId);
+          await sendTextMessage(
+            senderId,
+            `Perfect, ${displayName}! I've collected everything. Takashi will be in touch shortly.`
+          );
+          if (unit) {
+            const threadUrl = `https://m.me/${config.PAGE_ID}?ref=${referralRef || ''}`;
+            await sendHandoffEmail(stateData.fieldsCollected, unit, threadUrl);
+          }
+          return;
+        }
+
+        userState.set(senderId, stateData);
+        await sendQuestion(senderId, stateData.step, stateData.name);
+        return;
+      }
+    }
+
+    // Text steps: NAME, PHONE, OCCUPATION
+    if (stateData.step === STEP.NAME) {
+      const trimmed = (text || '').trim();
+      if (!trimmed) {
+        stateData.invalidAttempts++;
+        if (stateData.invalidAttempts >= 3) {
+          stateData.state = STATE.CLOSED;
+          userState.set(senderId, stateData);
+          return;
+        }
+        await sendInvalidAnswer(senderId, STEP.NAME);
+        userState.set(senderId, stateData);
+        return;
+      }
+      stateData.name = trimmed;
+      stateData.fieldsCollected.name = trimmed;
+      stateData.invalidAttempts = 0;
+      stateData.step = STEP.ADULTS;
       userState.set(senderId, stateData);
+      await sendQuestion(senderId, STEP.ADULTS, trimmed);
       return;
     }
+
+    if (stateData.step === STEP.PHONE) {
+      if (!isValidPhone(text)) {
+        stateData.invalidAttempts++;
+        if (stateData.invalidAttempts >= 3) {
+          stateData.state = STATE.CLOSED;
+          userState.set(senderId, stateData);
+          return;
+        }
+        await sendInvalidAnswer(senderId, STEP.PHONE);
+        userState.set(senderId, stateData);
+        return;
+      }
+      const digits = text.replace(/\D/g, '');
+      const normalized = digits.slice(-10);
+      stateData.fieldsCollected.phone = normalized;
+      stateData.invalidAttempts = 0;
+      stateData.step = STEP.OCCUPATION;
+      userState.set(senderId, stateData);
+      await sendQuestion(senderId, STEP.OCCUPATION, stateData.name);
+      return;
+    }
+
+    if (stateData.step === STEP.OCCUPATION) {
+      const trimmed = (text || '').trim();
+      if (!trimmed) {
+        stateData.invalidAttempts++;
+        if (stateData.invalidAttempts >= 3) {
+          stateData.state = STATE.CLOSED;
+          userState.set(senderId, stateData);
+          return;
+        }
+        await sendInvalidAnswer(senderId, STEP.OCCUPATION);
+        userState.set(senderId, stateData);
+        return;
+      }
+      stateData.fieldsCollected.occupation = trimmed;
+      stateData.invalidAttempts = 0;
+      stateData.step = STEP.INCOME;
+      userState.set(senderId, stateData);
+      await sendQuestion(senderId, STEP.INCOME, stateData.name);
+      return;
+    }
+
+    // Fallback: unknown step — ask current step question
+    await sendQuestion(senderId, stateData.step, stateData.name);
   }
 }
 
