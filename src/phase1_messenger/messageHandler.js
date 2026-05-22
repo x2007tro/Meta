@@ -24,7 +24,7 @@ async function getActiveCampaigns() {
   }
 
   const AD_ACCOUNT_ID = config.AD_ACCOUNT_ID;
-  const AD_ACCOUNT_URL = `https://graph.facebook.com/${config.GRAPH_API_VERSION}/act_${AD_ACCOUNT_ID}/campaigns`;
+  const AD_ACCOUNT_URL = `https://graph.facebook.com/${config.GRAPH_API_VERSION}/${AD_ACCOUNT_ID}/campaigns`;
 
   try {
     campaignCache.inflight = true;
